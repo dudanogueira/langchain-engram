@@ -1,0 +1,87 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "langchain-engram"
+version = "0.1.0"
+description = "An integration package connecting Weaviate Engram agent memory and LangChain"
+authors = []
+readme = "README.md"
+license = { text = "BSD-3-Clause" }
+requires-python = ">=3.11,<4.0"
+dependencies = [
+    "langchain-core>=1.0.0,<2.0.0",
+    "langchain>=1.0.0,<2.0.0",
+    "langgraph>=1.0.0,<2.0.0",
+    "weaviate-engram>=1.0.0,<2.0.0",
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: BSD License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+]
+
+[project.urls]
+"Source Code" = "https://github.com/weaviate/langchain-engram"
+"Engram Documentation" = "https://docs.weaviate.io/engram"
+
+[dependency-groups]
+test = [
+    "pytest>=8.0.0",
+    "pytest-asyncio>=0.23.0",
+]
+test_integration = []
+lint = ["ruff>=0.9.0"]
+typing = ["mypy>=1.10.0"]
+dev = []
+
+[tool.hatch.build.targets.wheel]
+packages = ["langchain_engram"]
+
+[tool.pytest.ini_options]
+addopts = "--strict-markers --strict-config"
+asyncio_mode = "auto"
+markers = [
+    "compile: mark placeholder test used in compilation testing to prevent dependency installation",
+]
+
+[tool.ruff]
+target-version = "py311"
+extend-exclude = ["notebooks"]
+
+[tool.ruff.lint]
+select = ["ALL"]
+ignore = [
+    "COM812",   # Messes with the formatter
+    "D203",     # Conflicts with D211
+    "D213",     # Conflicts with D212
+    "FIX002",   # Line contains TODO
+    "TD002",    # Missing author in TODO
+    "TD003",    # Missing issue link in TODO
+    "ANN401",   # `Any` is intentional for the Engram SDK's union config types
+    "PLR0913",  # Config-heavy constructors take many keyword arguments
+    "PLC0415",  # Lazy imports are deliberate (optional deps, avoiding cycles)
+    "PLR2004",  # Small namespace-length comparisons read fine inline
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["S101", "D", "ANN", "PLR2004", "SLF001", "FBT001", "FBT002", "RUF059", "ARG"]
+"scripts/**" = ["D", "ANN", "T201", "INP001"]
+"examples/**" = ["D", "ANN", "T201", "INP001"]
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"
+
+[tool.mypy]
+disallow_untyped_defs = true
+warn_unused_ignores = true
+
+[[tool.mypy.overrides]]
+module = "engram.*"
+ignore_missing_imports = true
