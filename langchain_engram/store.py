@@ -63,6 +63,10 @@ class EngramStore(BaseStore):
         timeout: float | None = None,
         retrieval_config: Any | None = None,
         properties: dict[str, str] | None = None,
+        conversation_id: str | None = None,
+        conversation_property: str = "conversation_id",
+        scope_search_to_conversation: bool = False,
+        topics: list[str] | None = None,
         client: EngramClient | None = None,
         async_client: AsyncEngramClient | None = None,
     ) -> None:
@@ -76,6 +80,16 @@ class EngramStore(BaseStore):
                 (named type or retrieval model). When omitted, vector retrieval
                 using the search `limit` is used.
             properties: Default Engram scope properties applied to every call.
+            conversation_id: Ties every written memory to a conversation, stored
+                under the Engram scope property named `conversation_property`.
+            conversation_property: Engram scope property name under which the
+                conversation id is stored. The actual name is defined when you
+                create your Engram project/topic (commonly `conversation_id` or
+                `session_id`); set this to match. Defaults to `conversation_id`.
+            scope_search_to_conversation: When `True`, `search` is filtered to the
+                bound `conversation_id`. When `False` (default), the conversation
+                id only tags writes.
+            topics: Default Engram topics to restrict `search` to.
             client: A pre-built synchronous client to reuse.
             async_client: A pre-built asynchronous client to reuse.
         """
@@ -84,6 +98,10 @@ class EngramStore(BaseStore):
         self._timeout = timeout
         self._retrieval_config = retrieval_config
         self._properties = properties
+        self._conversation_id = conversation_id
+        self._conversation_property = conversation_property
+        self._scope_search_to_conversation = scope_search_to_conversation
+        self._topics: list[Any] | None = topics
         self._client = client
         self._async_client = async_client
 
@@ -163,7 +181,7 @@ class EngramStore(BaseStore):
             _extract_text(op.value),
             user_id=user_id,
             group=group,
-            properties=self._properties,
+            properties=self._write_properties(),
         )
 
     def _do_search(self, client: EngramClient, op: SearchOp) -> list[SearchItem]:
@@ -172,6 +190,7 @@ class EngramStore(BaseStore):
             query=op.query or "",
             user_id=user_id,
             group=group,
+            topics=self._topics,
             retrieval_config=self._retrieval(op.limit),
             properties=self._search_properties(op.filter),
         )
@@ -197,9 +216,8 @@ class EngramStore(BaseStore):
             _extract_text(op.value),
             user_id=user_id,
             group=group,
-            properties=self._properties,
+            properties=self._write_properties(),
         )
-        return
 
     async def _ado_search(
         self, client: AsyncEngramClient, op: SearchOp
@@ -209,6 +227,7 @@ class EngramStore(BaseStore):
             query=op.query or "",
             user_id=user_id,
             group=group,
+            topics=self._topics,
             retrieval_config=self._retrieval(op.limit),
             properties=self._search_properties(op.filter),
         )
@@ -223,10 +242,18 @@ class EngramStore(BaseStore):
 
         return VectorRetrieval(limit=limit)
 
+    def _write_properties(self) -> dict[str, str] | None:
+        merged: dict[str, str] = dict(self._properties or {})
+        if self._conversation_id:
+            merged[self._conversation_property] = self._conversation_id
+        return merged or None
+
     def _search_properties(
         self, op_filter: dict[str, Any] | None
     ) -> dict[str, str] | None:
         merged: dict[str, str] = dict(self._properties or {})
+        if self._scope_search_to_conversation and self._conversation_id:
+            merged[self._conversation_property] = self._conversation_id
         for key, value in (op_filter or {}).items():
             if isinstance(value, (str, int, float, bool)):
                 merged[key] = str(value)

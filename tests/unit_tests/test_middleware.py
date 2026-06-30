@@ -188,3 +188,100 @@ def test_retrieval_config_passed_through(retrieval: str) -> None:
     _captured, handler = _capturing_handler()
     mw.wrap_model_call(_request([HumanMessage("hi")]), handler)
     assert fake.recorder.search_calls[0]["retrieval_config"] == retrieval
+
+
+# -- conversation_id --------------------------------------------------------
+
+
+def test_conversation_id_tags_writes_but_not_recall_by_default() -> None:
+    fake = FakeEngramClient(search_results=[make_memory("x")])
+    mw = EngramMiddleware(user_id="alice", conversation_id="conv-1")
+    mw._client = fake
+
+    _captured, handler = _capturing_handler()
+    mw.wrap_model_call(_request([HumanMessage("hi")]), handler)
+    mw.after_agent(
+        {"messages": [HumanMessage("hi"), AIMessage("yo")]},
+        SimpleNamespace(context=None),
+    )
+
+    # write is tagged with the conversation under the default `conversation_id` scope
+    assert fake.recorder.add_calls[0]["properties"] == {"conversation_id": "conv-1"}
+    # recall spans all of the user's memories (not filtered to the conversation)
+    assert fake.recorder.search_calls[0]["properties"] is None
+
+
+def test_conversation_id_scopes_recall_when_requested() -> None:
+    fake = FakeEngramClient(search_results=[make_memory("x")])
+    mw = EngramMiddleware(
+        user_id="alice",
+        conversation_id="conv-1",
+        scope_recall_to_conversation=True,
+        properties={"app": "web"},
+    )
+    mw._client = fake
+
+    _captured, handler = _capturing_handler()
+    mw.wrap_model_call(_request([HumanMessage("hi")]), handler)
+    assert fake.recorder.search_calls[0]["properties"] == {
+        "app": "web",
+        "conversation_id": "conv-1",
+    }
+
+
+def test_conversation_id_resolved_from_runtime_context() -> None:
+    fake = FakeEngramClient()
+    mw = EngramMiddleware(user_id="alice")  # conversation_id read from context
+    mw._client = fake
+
+    mw.after_agent(
+        {"messages": [HumanMessage("hi"), AIMessage("yo")]},
+        SimpleNamespace(context={"conversation_id": "ctx-conv"}),
+    )
+    assert fake.recorder.add_calls[0]["properties"] == {"conversation_id": "ctx-conv"}
+
+
+def test_custom_conversation_property_name() -> None:
+    fake = FakeEngramClient()
+    mw = EngramMiddleware(
+        user_id="alice", conversation_id="c9", conversation_property="thread"
+    )
+    mw._client = fake
+    mw.after_agent(
+        {"messages": [HumanMessage("hi"), AIMessage("yo")]},
+        SimpleNamespace(context=None),
+    )
+    assert fake.recorder.add_calls[0]["properties"] == {"thread": "c9"}
+
+
+# -- topics -----------------------------------------------------------------
+
+
+def test_topics_default_passed_to_search() -> None:
+    fake = FakeEngramClient(search_results=[make_memory("x")])
+    mw = EngramMiddleware(user_id="alice", topics=["preferences", "profile"])
+    mw._client = fake
+    _captured, handler = _capturing_handler()
+    mw.wrap_model_call(_request([HumanMessage("hi")]), handler)
+    assert fake.recorder.search_calls[0]["topics"] == ["preferences", "profile"]
+
+
+def test_topics_overridden_at_runtime() -> None:
+    fake = FakeEngramClient(search_results=[make_memory("x")])
+    mw = EngramMiddleware(user_id="alice", topics=["preferences"])
+    mw._client = fake
+    _captured, handler = _capturing_handler()
+    mw.wrap_model_call(
+        _request([HumanMessage("hi")], context={"topics": ["travel"]}), handler
+    )
+    # runtime context overrides the instantiation default
+    assert fake.recorder.search_calls[0]["topics"] == ["travel"]
+
+
+def test_topics_none_when_unset() -> None:
+    fake = FakeEngramClient(search_results=[make_memory("x")])
+    mw = EngramMiddleware(user_id="alice")
+    mw._client = fake
+    _captured, handler = _capturing_handler()
+    mw.wrap_model_call(_request([HumanMessage("hi")]), handler)
+    assert fake.recorder.search_calls[0]["topics"] is None

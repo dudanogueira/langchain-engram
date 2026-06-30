@@ -66,3 +66,30 @@ def test_missing_user_id_raises() -> None:
     search_tool, _ = create_memory_tools(client=fake)  # no user_id, no runtime
     with pytest.raises(ValueError, match="Could not resolve an Engram user id"):
         search_tool.invoke({"query": "q"})
+
+
+def test_conversation_id_tags_add() -> None:
+    fake = FakeEngramClient()
+    _, add_tool = create_memory_tools(
+        user_id="alice", conversation_id="conv-7", client=fake
+    )
+    add_tool.invoke({"text": "Likes aisle seats."})
+    assert fake.recorder.add_calls[0]["properties"] == {"conversation_id": "conv-7"}
+
+
+def test_search_not_conversation_scoped_by_default() -> None:
+    fake = FakeEngramClient(search_results=[make_memory("x")])
+    search_tool, _ = create_memory_tools(
+        user_id="alice", conversation_id="conv-7", client=fake
+    )
+    search_tool.invoke({"query": "q"})
+    assert fake.recorder.search_calls[0]["properties"] is None
+
+
+def test_topics_passed_to_search_tool() -> None:
+    fake = FakeEngramClient(search_results=[make_memory("x")])
+    search_tool, _ = create_memory_tools(
+        user_id="alice", topics=["profile"], client=fake
+    )
+    search_tool.invoke({"query": "q"})
+    assert fake.recorder.search_calls[0]["topics"] == ["profile"]

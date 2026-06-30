@@ -98,6 +98,39 @@ def test_list_namespaces_unsupported_returns_empty() -> None:
     assert store.list_namespaces() == []
 
 
+def test_conversation_id_tags_put() -> None:
+    fake = FakeEngramClient()
+    store = EngramStore(client=fake, conversation_id="conv-3")
+    store.put(("alice",), "k", {"content": "Plays cello."})
+    assert fake.recorder.add_calls[0]["properties"] == {"conversation_id": "conv-3"}
+
+
+def test_conversation_property_is_configurable() -> None:
+    # the scope property name is defined per Engram project; allow any name
+    fake = FakeEngramClient()
+    store = EngramStore(
+        client=fake, conversation_id="conv-3", conversation_property="session_id"
+    )
+    store.put(("alice",), "k", {"content": "x"})
+    assert fake.recorder.add_calls[0]["properties"] == {"session_id": "conv-3"}
+
+
+def test_search_conversation_scope_opt_in() -> None:
+    fake = FakeEngramClient(search_results=[make_memory("x")])
+    store = EngramStore(
+        client=fake, conversation_id="conv-3", scope_search_to_conversation=True
+    )
+    store.search(("alice",), query="q")
+    assert fake.recorder.search_calls[0]["properties"] == {"conversation_id": "conv-3"}
+
+
+def test_store_topics_passed_to_search() -> None:
+    fake = FakeEngramClient(search_results=[make_memory("x")])
+    store = EngramStore(client=fake, topics=["profile"])
+    store.search(("alice",), query="q")
+    assert fake.recorder.search_calls[0]["topics"] == ["profile"]
+
+
 async def test_async_put_and_search() -> None:
     fake = FakeEngramClient(
         search_results=[make_memory("Async fact.", memory_id="a1")], is_async=True

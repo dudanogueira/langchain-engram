@@ -65,8 +65,14 @@ class EngramMiddleware(AgentMiddleware):
         timeout: float | None = None,
         user_id: str | UserIdResolver | None = None,
         context_key: str = "user_id",
+        conversation_id: str | UserIdResolver | None = None,
+        conversation_id_context_key: str = "conversation_id",
+        conversation_property: str = "conversation_id",
+        scope_recall_to_conversation: bool = False,
         group: str | None = None,
         properties: dict[str, str] | None = None,
+        topics: list[str] | None = None,
+        topics_context_key: str = "topics",
         retrieval_config: Any | None = None,
         memory_header: str = _DEFAULT_MEMORY_HEADER,
         recall: bool = True,
@@ -83,9 +89,35 @@ class EngramMiddleware(AgentMiddleware):
                 value is read from the agent runtime context under `context_key`.
             context_key: Runtime context key holding the user id when `user_id`
                 is not supplied directly.
+            conversation_id: Ties each written memory to a conversation. A string
+                binds a fixed conversation; a callable `(runtime) -> str` resolves
+                it per invocation. If `None`, the value is read from the runtime
+                context under `conversation_id_context_key` (so it can be passed at
+                runtime via `agent.invoke(..., context={"conversation_id": ...})`).
+                Stored under the Engram scope property named `conversation_property`.
+            conversation_id_context_key: Runtime context key holding the
+                conversation id when `conversation_id` is not supplied directly.
+            conversation_property: Engram scope property name under which the
+                conversation id is stored. The actual name is defined when you
+                create your Engram project/topic (commonly `conversation_id` or
+                `session_id`); set this to match. Defaults to `conversation_id`.
+            scope_recall_to_conversation: When `True`, the `conversation_id` is
+                added to the recall search filter. When `False` (default), the
+                conversation id only tags writes and recall spans all of the
+                user's memories (cross-conversation long-term memory). Note that
+                this property is a filter, not a hard isolation boundary: true
+                per-conversation isolation (and conversation-scoped reconciliation)
+                requires the target Engram topic to be `scoped by` that property;
+                otherwise reconciliation is user-level and unscoped memories surface
+                in every conversation.
             group: Optional Engram group scope applied to reads and writes.
             properties: Optional Engram scope properties applied to reads and
                 writes (for example `{"app": "support"}`).
+            topics: Default Engram topics to restrict search to. Overridden at
+                runtime by a list under `topics_context_key` in the runtime
+                context.
+            topics_context_key: Runtime context key holding a per-invocation list
+                of topics that overrides `topics`.
             retrieval_config: Optional Engram retrieval configuration passed to
                 search — a named type (`"vector"`, `"bm25"`, `"hybrid"`,
                 `"fetch"`) or a retrieval model such as `HybridRetrieval(limit=5)`.
@@ -99,8 +131,14 @@ class EngramMiddleware(AgentMiddleware):
         self._timeout = timeout
         self._user_id = user_id
         self._context_key = context_key
+        self._conversation_id = conversation_id
+        self._conversation_id_context_key = conversation_id_context_key
+        self._conversation_property = conversation_property
+        self._scope_recall_to_conversation = scope_recall_to_conversation
         self._group = group
         self._properties = properties
+        self._topics: list[Any] | None = topics
+        self._topics_context_key = topics_context_key
         self._retrieval_config = retrieval_config
         self._memory_header = memory_header
         self._recall = recall
@@ -142,8 +180,9 @@ class EngramMiddleware(AgentMiddleware):
                     query=query,
                     user_id=user_id,
                     group=self._group,
+                    topics=self._resolve_topics(request.runtime),
                     retrieval_config=self._retrieval_config,
-                    properties=self._properties,
+                    properties=self._recall_properties(request.runtime),
                 )
                 request = self._with_memories(request, [m.content for m in results])
         except Exception:
@@ -166,8 +205,9 @@ class EngramMiddleware(AgentMiddleware):
                     query=query,
                     user_id=user_id,
                     group=self._group,
+                    topics=self._resolve_topics(request.runtime),
                     retrieval_config=self._retrieval_config,
-                    properties=self._properties,
+                    properties=self._recall_properties(request.runtime),
                 )
                 request = self._with_memories(request, [m.content for m in results])
         except Exception:
@@ -187,7 +227,7 @@ class EngramMiddleware(AgentMiddleware):
                     conversation,
                     user_id=self._resolve_user_id(runtime),
                     group=self._group,
-                    properties=self._properties,
+                    properties=self._write_properties(runtime),
                 )
         except Exception:
             logger.exception("Engram write failed; conversation not persisted")
@@ -206,7 +246,7 @@ class EngramMiddleware(AgentMiddleware):
                     conversation,
                     user_id=self._resolve_user_id(runtime),
                     group=self._group,
-                    properties=self._properties,
+                    properties=self._write_properties(runtime),
                 )
         except Exception:
             logger.exception("Engram write failed; conversation not persisted")
@@ -229,6 +269,42 @@ class EngramMiddleware(AgentMiddleware):
             )
             raise ValueError(msg)
         return resolved
+
+    def _resolve_conversation_id(self, runtime: Runtime[Any] | None) -> str | None:
+        value = self._conversation_id
+        if isinstance(value, str):
+            return value
+        if callable(value):
+            return value(runtime)
+        return _context_value(
+            getattr(runtime, "context", None), self._conversation_id_context_key
+        )
+
+    def _resolve_topics(self, runtime: Runtime[Any] | None) -> list[Any] | None:
+        override = _context_raw(
+            getattr(runtime, "context", None), self._topics_context_key
+        )
+        if override:
+            return [override] if isinstance(override, str) else list(override)
+        return self._topics
+
+    def _merge_properties(
+        self, conversation_id: str | None, *, include_conversation: bool
+    ) -> dict[str, str] | None:
+        props = dict(self._properties or {})
+        if include_conversation and conversation_id:
+            props[self._conversation_property] = conversation_id
+        return props or None
+
+    def _recall_properties(self, runtime: Runtime[Any] | None) -> dict[str, str] | None:
+        conversation_id = self._resolve_conversation_id(runtime)
+        return self._merge_properties(
+            conversation_id, include_conversation=self._scope_recall_to_conversation
+        )
+
+    def _write_properties(self, runtime: Runtime[Any] | None) -> dict[str, str] | None:
+        conversation_id = self._resolve_conversation_id(runtime)
+        return self._merge_properties(conversation_id, include_conversation=True)
 
     def _with_memories(
         self, request: ModelRequest, memories: list[str]
@@ -292,12 +368,16 @@ def _content_text(content: Any) -> str:
     return str(content)
 
 
-def _context_value(context: Any, key: str) -> str | None:
-    """Read a key from a runtime context that may be a mapping or object."""
+def _context_raw(context: Any, key: str) -> Any:
+    """Read a raw key from a runtime context that may be a mapping or object."""
     if context is None:
         return None
     if isinstance(context, dict):
-        value = context.get(key)
-    else:
-        value = getattr(context, key, None)
+        return context.get(key)
+    return getattr(context, key, None)
+
+
+def _context_value(context: Any, key: str) -> str | None:
+    """Read a key from a runtime context and coerce it to a non-empty string."""
+    value = _context_raw(context, key)
     return str(value) if value else None

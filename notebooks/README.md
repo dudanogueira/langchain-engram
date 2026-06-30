@@ -48,6 +48,8 @@ Both pick up your local edits after a kernel restart.
 | `1_middleware_agent_memory.ipynb` | `EngramMiddleware`: automatic recall + write, dynamic `user_id` | yes |
 | `2_memory_tools.ipynb` | `create_memory_tools`: agent-controlled `search_memories` / `add_memories` | yes |
 | `3_engram_store.ipynb` | `EngramStore`: the LangGraph `BaseStore` adapter | last cell only |
+| `4_conversation_scoping.ipynb` | Tie memories to a conversation (stored under your project's scope property — `conversation_id` / `session_id`; needs a scoped topic) | yes |
+| `5_topics.ipynb` | Restrict recall to `topics` (e.g. `ConversationSummary`), with per-invocation override | yes |
 
 ## A note on timing
 

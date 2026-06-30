@@ -1,14 +1,25 @@
 name: CI
 
+# Runs on every pull request (any target branch) and on pushes to main.
 on:
   push:
     branches: [main]
   pull_request:
 
+# Cancel superseded runs for the same branch/PR to save CI minutes.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
 jobs:
   test:
+    name: Test (py${{ matrix.python-version }})
     runs-on: ubuntu-latest
     strategy:
+      fail-fast: false
       matrix:
         python-version: ["3.11", "3.12", "3.13"]
     steps:
@@ -17,6 +28,7 @@ jobs:
         uses: astral-sh/setup-uv@v5
         with:
           python-version: ${{ matrix.python-version }}
+          enable-cache: true
       - name: Install dependencies
         run: uv sync --all-groups
       - name: Lint
